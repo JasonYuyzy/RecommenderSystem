@@ -6,6 +6,14 @@ import progressbar
 import random
 import time, datetime
 from ast import literal_eval
+
+from surprise import SVD
+from surprise import accuracy
+from surprise import Dataset, Reader
+from surprise.model_selection import KFold
+from surprise.model_selection import cross_validate, train_test_split
+
+
 from nltk.stem.snowball import SnowballStemmer
 from sklearn.metrics.pairwise import linear_kernel
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -470,7 +478,7 @@ def csv_restaurant_rating_average(restaurant_dcit):
             count += 1
             p7.update(count)
 
-
+    users_rating = reviews[['user_id', 'business_id', 'stars']]
     del reviews
     del idre_idres
     del reid_restar
@@ -484,8 +492,8 @@ def csv_restaurant_rating_average(restaurant_dcit):
     m = rest_rating_average_df['ra_count'].quantile(0.95)
     rest_rating_average_df = rest_rating_average_df[rest_rating_average_df['ra_count'] >= m]
     c = rest_rating_average_df['ra_average'].mean()
-    rest_rating_average_df['ra_weight'] = rest_rating_average_df.apply(ra_weight, axis=1, args=(m, c))
-    rest_rating_average_df = rest_rating_average_df.sort_values('ra_weight', ascending=False)
+    rest_rating_average_df['cb_ra_weight'] = rest_rating_average_df.apply(cb_ra_weight, axis=1, args=(m, c))
+    rest_rating_average_df = rest_rating_average_df.sort_values('cb_ra_weight', ascending=False)
 
     del rating_average
     del rating_count
@@ -493,11 +501,19 @@ def csv_restaurant_rating_average(restaurant_dcit):
     del ra_average_df
     del restaurant_dcit
     print("Rating average collected")
-    return rest_rating_average_df, users_review
-def ra_weight(restaurant_dcit, m, c):
+    return rest_rating_average_df, users_review, users_rating
+def cb_ra_weight(restaurant_dcit, m, c):
     v = restaurant_dcit['ra_count']
     r = restaurant_dcit['ra_average']
     return v / (v + m) * r + m / (v + m) * c
+
+def user_rating_filtering(users_review, rest_dict):
+    print("Filtering the users rating...")
+    users_review = users_review[users_review['business_id'].apply(lambda x: x in rest_dict)]
+    #users_review.set_index('user_id', inplace=True)
+    print("Finished filtering")
+    return users_review
+
 
 def csv_user_collecting(restaurant_dcit, rest_dict):
     print('Start collecting user rating matrix...')
@@ -539,8 +555,38 @@ def csv_user_collecting(restaurant_dcit, rest_dict):
     #print(final_rating_matrix)
     return final_rating_matrix
 
+def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
+    print("Start prediction by CF...")
+    reader = Reader(rating_scale=(1, 5))
+    rating_data = Dataset.load_from_df(users_rating_df, reader)
 
-def cal_restaurant_recommend(restaurant, visited):
+    cross_validation = KFold(n_splits=5)
+    model = SVD()
+    for trainset, testset in cross_validation.split(rating_data):
+        model.fit(trainset)
+        predictions = model.test(testset)
+
+        print("Learning rate:", accuracy.rmse(predictions, verbose=True))
+
+    rest_dict = set(rest_data_df['business_id'])
+    user_rating_predic = dict()
+    for rest in rest_dict:
+        predict = model.predict(user_id, rest)
+        user_rating_predic[rest] = round(predict.est,3)
+
+    user_rates = pd.DataFrame(user_rating_predic, index=[0]).transpose().reset_index()
+    user_rates.columns = ['business_id', 'cf_prediction']
+    final_df = pd.merge(rest_data_df, user_rates, how='left', on='business_id')
+    print("Prediction finished")
+    return final_df
+
+def CF_cal_restaurant_recommend(rest_data_df):
+    top_rest = rest_data_df.sort_values('cf_prediction', ascending=False)
+    recommend_rest = top_rest[['name', 'categories', 'cf_prediction']][:10]
+    return recommend_rest
+
+
+def CB_cal_restaurant_recommend(restaurant, visited):
     print("Starting recommend...")
     tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
     tfidf_matrix = tf.fit_transform(restaurant['categories'])
@@ -563,9 +609,10 @@ def cal_restaurant_recommend(restaurant, visited):
     rec_df = pd.DataFrame(list(rec), columns=['business_id'])
     top_rest = rec_df.merge(restaurant, how='left', on='business_id')
     #top_rest = top_rest.sort_values('ra_average', ascending=False)
-    top_rest = top_rest.sort_values('ra_weight', ascending=False)
-    recommend_rest = top_rest[['name', 'categories', 'ra_weight', 'ra_average']][:10]
+    top_rest = top_rest.sort_values('cb_ra_weight', ascending=False)
+    recommend_rest = top_rest[['name', 'categories', 'cb_ra_weight', 'ra_average']][:10]
     return recommend_rest
+
 
 #users_group = restaurant_user_finder(user_id)
 #review_group, restaurant_reviews_average = restaurant_review_finder(users_group)
@@ -575,22 +622,28 @@ def cal_restaurant_recommend(restaurant, visited):
 #feature_matrix = building_restaurant_feature_matrix(feature_group, feature)
 #categories_matrix = building_restaurant_categories_matrix(categories_group, categories)
 #restaurant_tips_finder()
-
+#restaurant_rating_average, rest = restaurant_rating_average_finder()
+#restaurant_description, rests = restaurant_tips_categories_combiner(rest)
 
 if __name__ == '__main__':
-    categories_df = csv_restaurant_categories_combiner()
-    covid_info_df = csv_covid_info_collect(categories_df['business_id'])
-    restaurant_info_df = pd.merge(covid_info_df, categories_df, how='left', on='business_id')
-    rating_average_with_weight_df, users_review = csv_restaurant_rating_average(set(restaurant_info_df['business_id']))
-    user_features_df = csv_user_collecting(users_review, set(restaurant_info_df['business_id']))
-    a = similarity(user_features_df)
-    print(a.T)
-    exit()
+    #CB recommender
+    visited = {'Yl05MqCs9xRzrJFkGWLpgA': 1, '2iTsRqUsPGRH1li1WVRvKQ': 1, 'fuW-VCynECpKukrm-9nxdg': 1}
+    rest_data_df = csv_restaurant_categories_combiner()
+    covid_info_df = csv_covid_info_collect(rest_data_df['business_id'])
+    rest_data_df = pd.merge(covid_info_df, rest_data_df, how='left', on='business_id')
+    rating_average_df, users_review, users_rating = csv_restaurant_rating_average(set(rest_data_df['business_id']))
+    rest_data_df = pd.merge(rating_average_df, rest_data_df, how='left', on='business_id')
+    top_10_restaurant = CB_cal_restaurant_recommend(rest_data_df, visited)
+    print(top_10_restaurant)
+    #user_features_df = csv_user_collecting(users_review, set(rest_data_df['business_id']))
+
+    #CF recommender
+    user_id = 'HoyH3jYg9wgReyVmaTxlTg'
+    users_rating_df = user_rating_filtering(users_rating, set(rest_data_df['business_id']))
+    rest_data_df = CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id)
+    top_10_restaurant = CF_cal_restaurant_recommend(rest_data_df)
+    print(top_10_restaurant)
     #restaurant = pd.merge(rating_average_with_weight_df, restaurant_info_df, how='left', on='business_id')
     #visited = user_visited(user_id)
-    visited = {'Yl05MqCs9xRzrJFkGWLpgA': 1, '2iTsRqUsPGRH1li1WVRvKQ': 1, 'fuW-VCynECpKukrm-9nxdg': 1}
     #print(restaurant)
-    #restaurant_rating_average, rest = restaurant_rating_average_finder()
-    #restaurant_description, rests = restaurant_tips_categories_combiner(rest)
-    top_10_restaurant = cal_restaurant_recommend(restaurant, visited)
-    print(top_10_restaurant)
+
