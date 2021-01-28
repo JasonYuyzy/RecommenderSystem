@@ -566,7 +566,7 @@ def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
         model.fit(trainset)
         predictions = model.test(testset)
 
-        print("Learning rate:", accuracy.rmse(predictions, verbose=True))
+        accuracy.rmse(predictions, verbose=True)
 
     rest_dict = set(rest_data_df['business_id'])
     user_rating_predic = dict()
