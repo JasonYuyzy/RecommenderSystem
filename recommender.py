@@ -385,7 +385,7 @@ def csv_restaurant_categories_combiner():
     restaurant['categories'].dropna(axis=0)
     restaurant['is_open'].dropna(axis=0)
     restaurant = restaurant[~restaurant['is_open'].isin([0])]
-    restaurant = restaurant[restaurant['review_count'].apply(lambda x: int(x) > 500)]
+    restaurant = restaurant[restaurant['review_count'].apply(lambda x: int(x) > 400)]
     categories_dic = dict(zip(restaurant['business_id'], restaurant['categories']))
     categories_description = dict()
     p8.start(len(restaurant))
@@ -557,16 +557,22 @@ def csv_user_collecting(restaurant_dcit, rest_dict):
 
 def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
     print("Start prediction by CF...")
+    user_watched = set(users_rating_df[users_rating_df['user_id'].apply(lambda x: x==user_id)]['business_id'])
     reader = Reader(rating_scale=(1, 5))
     rating_data = Dataset.load_from_df(users_rating_df, reader)
 
-    cross_validation = KFold(n_splits=5)
-    model = SVD()
-    for trainset, testset in cross_validation.split(rating_data):
-        model.fit(trainset)
-        predictions = model.test(testset)
+    trainset, testset = train_test_split(rating_data, test_size=.25)
+    #cross_validation = KFold(n_splits=2)
+    model = SVD(n_factors=800)
+    #for trainset, testset in cross_validation.split(rating_data):
+        #model.fit(trainset)
+        #predictions = model.test(testset)
 
-        accuracy.rmse(predictions, verbose=True)
+        #accuracy.rmse(predictions, verbose=True)
+
+    model.fit(trainset)
+    predictions = model.test(testset)
+    accuracy.rmse(predictions, verbose=True)
 
     rest_dict = set(rest_data_df['business_id'])
     user_rating_predic = dict()
@@ -574,9 +580,44 @@ def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
         predict = model.predict(user_id, rest)
         user_rating_predic[rest] = round(predict.est,3)
 
+
+
     user_rates = pd.DataFrame(user_rating_predic, index=[0]).transpose().reset_index()
     user_rates.columns = ['business_id', 'cf_prediction']
     final_df = pd.merge(rest_data_df, user_rates, how='left', on='business_id')
+
+    tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
+
+    tfidf_matrix = tf.fit_transform(rest_data_df['categories'])
+
+    cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
+
+    matrix_sim = pd.DataFrame(cosine_similar, columns=rest_data_df['business_id'], index=rest_data_df['business_id'])
+    rank = {}
+    print(user_watched)
+    for rest in rest_dict:
+        for bus_id in user_watched:
+            score = 0
+            predict = model.predict(user_id, rest)
+            p_v = round(predict.est,3)
+            if bus_id == rest:
+                continue
+            else:
+                sim = matrix_sim[bus_id][rest]
+                score += (p_v*sim)/abs(sim)
+        score = round(score/len(user_watched), 3)
+        rank[rest] = score
+
+    hybrid_rates = pd.DataFrame(rank, index=[0]).transpose().reset_index()
+    del rank
+    hybrid_rates.columns = ['business_id', 'hy_rate']
+    final_df = pd.merge(rest_data_df, hybrid_rates, how='left', on='business_id')
+    top_rest = final_df.sort_values('hy_rate', ascending=False)
+    recommend_rest = top_rest[['name', 'categories', 'hy_rate']][:10]
+    print(recommend_rest)
+
+
+
     print("Prediction finished")
     return final_df
 
@@ -589,6 +630,7 @@ def CF_cal_restaurant_recommend(rest_data_df):
 def CB_cal_restaurant_recommend(restaurant, visited):
     print("Starting recommend...")
     tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
+
     tfidf_matrix = tf.fit_transform(restaurant['categories'])
 
     cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
@@ -627,7 +669,7 @@ def CB_cal_restaurant_recommend(restaurant, visited):
 
 if __name__ == '__main__':
     #CB recommender
-    visited = {'Yl05MqCs9xRzrJFkGWLpgA': 1, '2iTsRqUsPGRH1li1WVRvKQ': 1, 'fuW-VCynECpKukrm-9nxdg': 1}
+    visited = {'xfWdUmrz2ha3rcigyITV0g': 1, 'OETh78qcgDltvHULowwhJg': 1, '4JNXUYY8wbaaDmk3BPzlWw': 1, 'sKA6EOpxvBtCg7Ipuhl1RQ': 1}
     rest_data_df = csv_restaurant_categories_combiner()
     covid_info_df = csv_covid_info_collect(rest_data_df['business_id'])
     rest_data_df = pd.merge(covid_info_df, rest_data_df, how='left', on='business_id')
@@ -638,11 +680,11 @@ if __name__ == '__main__':
     #user_features_df = csv_user_collecting(users_review, set(rest_data_df['business_id']))
 
     #CF recommender
-    user_id = 'HoyH3jYg9wgReyVmaTxlTg'
+    user_id = 'yPv39tqbBwsiMj6M7hQjWQ'
     users_rating_df = user_rating_filtering(users_rating, set(rest_data_df['business_id']))
     rest_data_df = CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id)
-    top_10_restaurant = CF_cal_restaurant_recommend(rest_data_df)
-    print(top_10_restaurant)
+    #top_10_restaurant = CF_cal_restaurant_recommend(rest_data_df)
+    #print(top_10_restaurant)
     #restaurant = pd.merge(rating_average_with_weight_df, restaurant_info_df, how='left', on='business_id')
     #visited = user_visited(user_id)
     #print(restaurant)
