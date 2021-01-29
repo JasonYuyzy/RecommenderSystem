@@ -7,10 +7,11 @@ import random
 import time, datetime
 from ast import literal_eval
 
-from surprise import SVD
+from surprise import SVD, SVDpp
 from surprise import accuracy
 from surprise import Dataset, Reader
 from surprise.model_selection import KFold
+from surprise.model_selection import GridSearchCV
 from surprise.model_selection import cross_validate, train_test_split
 
 
@@ -558,32 +559,58 @@ def csv_user_collecting(restaurant_dcit, rest_dict):
 def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
     print("Start prediction by CF...")
     user_watched = set(users_rating_df[users_rating_df['user_id'].apply(lambda x: x==user_id)]['business_id'])
-    reader = Reader(rating_scale=(1, 5))
-    rating_data = Dataset.load_from_df(users_rating_df, reader)
+    reader = Reader(rating_scale=(0, 5))#
+    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
 
-    trainset, testset = train_test_split(rating_data, test_size=.25)
-    #cross_validation = KFold(n_splits=2)
-    model = SVD(n_factors=800)
-    #for trainset, testset in cross_validation.split(rating_data):
-        #model.fit(trainset)
-        #predictions = model.test(testset)
+    #First SVD to filter the unaccerry ratings
+    #trainset, testset = train_test_split(rating_data, test_size=.25)
+    cross_validation = KFold(n_splits=3)
+    model = SVD(n_factors=100)
 
-        #accuracy.rmse(predictions, verbose=True)
 
-    model.fit(trainset)
-    predictions = model.test(testset)
-    accuracy.rmse(predictions, verbose=True)
+    for trainset, testset in cross_validation.split(rating_data):
+        model.fit(trainset)
+        predictions = model.test(testset)
 
+        accuracy.rmse(predictions, verbose=True)
+
+    #model.fit(trainset)
+    #predictions = model.test(testset)
+    #accuracy.rmse(predictions, verbose=True)
     rest_dict = set(rest_data_df['business_id'])
     user_rating_predic = dict()
     for rest in rest_dict:
         predict = model.predict(user_id, rest)
         user_rating_predic[rest] = round(predict.est,3)
 
-
-
     user_rates = pd.DataFrame(user_rating_predic, index=[0]).transpose().reset_index()
     user_rates.columns = ['business_id', 'cf_prediction']
+    user_rates = user_rates.sort_values('cf_prediction', ascending=False)
+
+    #based on the first filtering, give the 30 most possible predictions
+    print(user_rates['business_id'].head(30))
+    users_rating_df = users_rating_df[users_rating_df['business_id'].apply(lambda x: x in set(user_rates['business_id'].head(30)))]
+    #print(users_rating_df)
+    #exit()
+
+    #second SVD filtering to predict better
+    reader = Reader(rating_scale=(0, 5))  #
+    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
+
+    # trainset, testset = train_test_split(rating_data, test_size=.25)
+    cross_validation = KFold(n_splits=3)
+    model = SVDpp(n_factors=20)
+
+    for trainset, testset in cross_validation.split(rating_data):
+        model.fit(trainset)
+        predictions = model.test(testset)
+
+        accuracy.rmse(predictions, verbose=True)
+
+    exit()
+
+
+
     final_df = pd.merge(rest_data_df, user_rates, how='left', on='business_id')
 
     tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
