@@ -14,7 +14,7 @@ from surprise.model_selection import KFold
 from surprise.model_selection import GridSearchCV
 from surprise.model_selection import cross_validate, train_test_split
 
-
+import nltk
 from nltk.stem.snowball import SnowballStemmer
 from sklearn.metrics.pairwise import linear_kernel
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -30,231 +30,9 @@ p5 = progressbar.ProgressBar()
 p6 = progressbar.ProgressBar()
 p7 = progressbar.ProgressBar()
 p8 = progressbar.ProgressBar()
+p9 = progressbar.ProgressBar()
 
 user_id = 'QaELAmRcDc5TfJEylaaP8g'
-#collaborative filtering item-item
-
-def restaurant_user_finder(user_id): #friends so far
-    print("Finding user groups...")
-    users_group = {}
-    count = 0
-    with open('./rest_data/users_restaurants.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        p1.start(len(dicts))
-        for i in dicts:
-            count += 1
-            #if len(i['friends'].split(',')) > 30:
-                #user_list.append(i['user_id'])
-            #if i['user_id'] == user_id:
-            if len(i['friends'].split(',')) > 200:
-                friend_lst = i['friends'].split(',')
-                for friend in friend_lst:
-                    users_group[friend] = 1
-                #break
-                #if len(users_group) > 100000:
-                    #break
-                    #p1.update(len(dicts))
-            p1.update(count)
-
-    f.close()
-    del dicts
-    #print(user_list)
-    print("Found friends:", len(users_group))
-    return users_group
-
-def user_visited(user_id):
-    with open('./rest_data/users_reviews_restaurants.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        visited = {}
-        print("Review number:", len(dicts))
-        for all in dicts:
-            for i in all:
-                if len(all[i]) == 40:
-                    for busi in all[i]:
-                        if all[i][busi] ==5 :
-                            visited[busi] = all[i][busi]
-                            break
-                    break
-            break
-
-
-    f.close()
-    del dicts
-    print("Visited collected", visited)
-    return visited
-
-def restaurant_review_finder(users_group):
-    print("Finding restaurant and reviews...")
-    review_group = {}
-    restaurant_reviews_average = {}
-    num_of_review = 0
-    with open('./rest_data/reviews_restaurants.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        print("Review number:", len(dicts))
-        for i in dicts:
-            if i['user_id'] in users_group:
-                if i['user_id'] not in review_group:
-                    review_group.update({i['user_id']: {}})
-                review_group[i['user_id']][i['business_id']] = i['stars']
-                if i['business_id'] not in restaurant_reviews_average:
-                    restaurant_reviews_average.update({i['business_id']: i['stars']})
-                origin_star = restaurant_reviews_average[i['business_id']]
-                restaurant_reviews_average.update({i['business_id']: (i['stars']+origin_star)/2})
-                num_of_review += 1
-
-    f.close()
-    print("Found review:", num_of_review, "from ", len(review_group), "users")
-    del dicts
-    return review_group, restaurant_reviews_average
-
-def restaurant_feature_finder():
-    print("Collecting features...")
-    features_group = {}
-    features = {}
-    with open('./rest_data/restaurants_features.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        print("Restaurant number:", len(dicts))
-        for i in dicts:
-            features_group.update({i: {}})
-            for j in dicts[i]: #go through each feature
-                #filtering features details
-                if j not in features:
-                    features[j]={}
-                    if dicts[i][j] == True and type(dicts[i][j]) != int:
-                        features[j][dicts[i][j]] = 1
-                    elif dicts[i][j] == False:
-                        features[j][dicts[i][j]] = 0
-                    else:
-                        features[j][dicts[i][j]] = 0
-
-                if dicts[i][j] not in features[j]:
-                    if dicts[i][j] == True and type(dicts[i][j]) != int:
-                        features[j][dicts[i][j]] = 1
-                    elif dicts[i][j] == False:
-                        features[j][dicts[i][j]] = 0
-                    else:
-                        features[j][dicts[i][j]] = len(features[j])
-
-                if dicts[i][j] == True:
-                    features_group[i].update({j: 1})
-                elif dicts[i][j] == False:
-                    features_group[i].update({j: 0})
-                else:
-                    features_group[i].update({j: features[j][dicts[i][j]]})
-
-        return features_group, features
-
-def restaurant_categories_finder():
-    print("Collecting categories...")
-    categories_group = {}
-    categories = {}
-    with open('./rest_data/restaurants_categories.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        print("Restaurant number:", len(dicts))
-        for i in dicts:
-            categories_group.update({i: {}})
-            for j in dicts[i]:  # go through each feature
-                # filtering the repeat
-                char = j.split()
-                # filtering features details
-                if ''.join(char) not in categories:
-                    categories[''.join(char)] = 1
-                else:
-                    categories[''.join(char)] = 1 + categories[''.join(char)]
-
-                categories_group[i][''.join(char)] = 1
-        del dicts
-        categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)
-        #print(categories[2:202])
-        return categories_group, categories[2:202]
-
-def restaurant_tips_finder():
-    print("Collecting tips...")
-    tips_group = {}
-    tips = {}
-    count = 0
-    with open('./rest_data/tips_restaurants.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        stemmer = SnowballStemmer('english')
-        stop = set(stopwords.words('english'))
-        print("Tips number:", len(dicts))
-        p4.start(63961)
-        for i in dicts:
-            try:
-                #count += 1
-                p4.update(len(tips_group))
-                if len(tips_group) == 63961:
-                    break
-                if len(tips_group[i['business_id']]) > 50:
-                    continue
-            except:
-                text_lst = [w for w in i['text'].split(' ') if w not in stopwords.words('english')]
-                text_lst = list(set(text_lst))
-                text = ' '.join(text_lst)
-                if i['business_id'] not in tips_group:
-                    tips_group.update({i['business_id']: stemmer.stem(text)})
-                    continue
-                tips_group.update({i['business_id']: stemmer.stem(text + " " + tips_group[i['business_id']])})
-                #count += 1
-                p4.update(len(tips_group))
-
-
-        #print(tips_group)
-        #exit()
-        # print(categories[2:202])
-        return tips_group
-
-def restaurant_rating_average_finder():
-    print("Collecting rating average...")
-    rating_count = dict()
-    rating_sum = dict()
-    rating_average = dict()
-    rest = dict()
-    count = 0
-    with open('./rest_data/reviews_restaurants.json', mode='r', encoding='utf-8') as f:
-        dicts = json.load(f)
-        p5.start(len(dicts))
-        print("Review number:", len(dicts))
-        for i in dicts:
-            #if int(i['date'].split('-')[0]) < 2015:
-                #count += 1
-                #p5.update(count)
-                #continue
-            if i['business_id'] is None and i['user_id'] is None:
-                continue
-            if i['business_id'] not in rating_count:
-                rating_sum[i['business_id']] = i['stars']
-                rating_count[i['business_id']] = 1
-                rest[i['business_id']] = 1
-                continue
-            rating_sum.update({i['business_id']: rating_sum[i['business_id']]+i['stars']})
-            rating_count.update({i['business_id']: rating_count[i['business_id']]+1})
-            count += 1
-            p5.update(count)
-
-        del dicts
-        f.close()
-
-        for r in rating_sum:
-            rating_average[r] = round(rating_sum[r]/rating_count[r], 3)
-        del rating_sum
-        dataf_count = pd.DataFrame(rating_count, index=[0]).transpose().reset_index()
-        dataf_count.columns = ['business_id', 'r_count']
-        dataf_average = pd.DataFrame(rating_average, index=[0]).transpose().reset_index()
-        dataf_average.columns = ['business_id', 'r_average']
-        rating_count_average = pd.merge(dataf_count, dataf_average, how='left', on='business_id')
-        del dataf_count
-        del dataf_average
-        m = rating_count_average['r_count'].quantile(0.95)
-        rating_count_average = rating_count_average[rating_count_average['r_count'] >= m]
-        c = rating_count_average['r_average'].mean()
-
-        rating_count_average['r_weight'] = rating_count_average.apply(ra_weight, axis=1, args=(m, c))
-        rating_count_average = rating_count_average.sort_values('r_weight', ascending=False)
-
-
-        print("Rating average collecting done")
-        return rating_count_average, rest
 
 def restaurant_tips_categories_combiner(rest):
     print("Collecting categories...")
@@ -309,76 +87,7 @@ def restaurant_tips_categories_combiner(rest):
 
     return dataf_description, dataf_rest_id
 
-def building_review_matrix(review_group, restaurant_reviews_average):
-    print("Creating review matrix...")
-    restaurant_array = [i for i in restaurant_reviews_average]
-    final_review_array = [restaurant_array]
-    p2.start(len(review_group))
-    count = 0
-    for user_id in review_group:
-        user_array = [user_id]
-        for j in restaurant_reviews_average:
-            if j in review_group[user_id]:
-                user_array.append(review_group[user_id][j])
-            else:
-                user_array.append(None)
-        final_review_array.append(user_array)
-        count += 1
-        p2.update(count)
-    final_array = np.array(final_review_array, dtype=object)
-    #final_array = final_array.pivot_table(index='user_id', columns='product_id', values='order_id', aggfunc='count')
-
-    print(final_array[0][3])
-    print(final_array[4][0])
-    print(final_array[7][12])
-    print("Done review matrix")
-    return final_array
-
-def building_restaurant_feature_matrix(feature_group, feature):
-    print("Creating restaurant feature matrix...")
-    restaurant_array = [i for i in feature]
-    final_array = [restaurant_array]
-    p3.start(len(feature_group))
-    count = 0
-    for rest_id in feature_group:
-        rest_array = [rest_id]
-        for j in feature:
-            if j in feature_group[rest_id]:
-                rest_array.append(feature_group[rest_id][j])
-            else:
-                rest_array.append(None)
-        final_array.append(rest_array)
-        count += 1
-        p3.update(count)
-
-    final_array = np.array(final_array, dtype=object)
-    print("Done features matrix")
-    return final_array
-
-def building_restaurant_categories_matrix(categories_group, categories):
-    print("Creating restaurant feature matrix...")
-    categories_array = [i[0] for i in categories]
-    final_array = [categories_array]
-    p3.start(len(categories_group))
-    count = 0
-    for rest_id in categories_group:
-        categories_array = [rest_id]
-        for j in categories:
-            if j[0] in categories_group[rest_id]:
-                categories_array.append(categories_group[rest_id][j[0]])
-            else:
-                categories_array.append(0)
-        final_array.append(categories_array)
-        count += 1
-        p3.update(count)
-
-    final_array = np.array(final_array, dtype=object)
-    print("Done categories matrix")
-    return final_array
-
-
-
-def csv_restaurant_categories_combiner():
+def csv_restaurant_categories_collect():
     print("Start collecting the restaurants' information...")
     restaurant = pd.read_csv('./data_file/restaurant.csv')[['business_id', 'name', 'categories','is_open', 'review_count']]
     restaurant['business_id'].dropna(axis=0)
@@ -399,6 +108,8 @@ def csv_restaurant_categories_combiner():
         text_lst = list(set(text_lst))
         if "Food" in text_lst:
             text_lst.remove("Food")
+        if "Restaurants" in text_lst:
+            text_lst.remove("Restaurants")
         categories_description[rest_id] = str(text_lst)
         count += 1
         p8.update(count)
@@ -411,8 +122,8 @@ def csv_restaurant_categories_combiner():
 
     rest_categories = pd.DataFrame(categories_description, index=[0]).transpose().reset_index()
     rest_categories.columns = ['business_id', 'categories']
-    rest_categories['categories'] = rest_categories['categories'].apply(literal_eval)
-    rest_categories['categories'] = rest_categories['categories'].apply(lambda x: ' '.join(x))
+    #rest_categories['categories'] = rest_categories['categories'].apply(literal_eval)
+    #rest_categories['categories'] = rest_categories['categories'].apply(lambda x: ' '.join(x))
     restaurant = pd.merge(rest_categories, name, how='left', on='business_id')
     #print(rest_categories)
 
@@ -420,6 +131,58 @@ def csv_restaurant_categories_combiner():
     del categories_description
     print("Information collected")
     return restaurant
+
+def csv_tips_cocategories_combination(rest_dict):
+    print("Collecting the tips info...")
+    stemmer = SnowballStemmer('english')
+    stop = set(stopwords.words('english'))
+    tips_df = pd.read_csv('./data_file/tips.csv')
+    tips_df['text'].dropna(axis=0)
+    categories_dict = dict(zip(rest_dict['business_id'], rest_dict['categories']))
+        #print(type(eval(categories_dict[i])))
+    del rest_dict
+    tips_df = tips_df[tips_df['business_id'].apply(lambda x: x in categories_dict)]
+    user_rest = dict(zip(tips_df['user_id'], tips_df['business_id']))
+    user_tips = dict(zip(tips_df['user_id'], tips_df['text']))
+    del tips_df
+    rest_tips = dict()
+    p9.start(len(user_rest))
+    count = 0
+    for user_id in user_rest:
+        rest_id = user_rest[user_id]
+        tips = user_tips[user_id]
+        text_lst = nltk.regexp_tokenize(tips, pattern=r'\w+|\S\w')
+        text_lst = list(set(text_lst))
+        text_lst = [stemmer.stem(w) for w in text_lst if len(w.strip()) > 3]
+        text_lst = [w for w in text_lst if w.strip() not in stop]
+        text_lst = eval(categories_dict[rest_id]) + text_lst
+        text_lst = list(set(text_lst))
+        if "Food" in text_lst:
+            text_lst.remove("Food")
+        if rest_id not in rest_tips:
+            rest_tips[rest_id] = text_lst
+            count += 1
+            continue
+        if len(rest_tips[rest_id]) > 70:
+            count += 1
+            continue
+
+        rest_tips[rest_id] += text_lst
+        count += 1
+        p9.update(count)
+
+    for i in rest_tips:
+        rest_tips[i] = str(rest_tips[i])
+
+    del user_rest
+    del user_tips
+    del stop
+    rest_tips_df = pd.DataFrame(rest_tips, index=[0]).transpose().reset_index()
+    del rest_tips
+    rest_tips_df.columns = ['business_id', 'description']
+    rest_tips_df['description'] = rest_tips_df['description'].apply(literal_eval)
+    rest_tips_df['description'] = rest_tips_df['description'].apply(lambda x: ' '.join(x))
+    return rest_tips_df
 
 def csv_covid_info_collect(restaurant_dcit):
     print("Collecting the covid information...")
@@ -563,20 +326,13 @@ def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
     rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
 
     #First SVD to filter the unaccerry ratings
-    #trainset, testset = train_test_split(rating_data, test_size=.25)
     cross_validation = KFold(n_splits=3)
     model = SVD(n_factors=100)
-
-
     for trainset, testset in cross_validation.split(rating_data):
         model.fit(trainset)
         predictions = model.test(testset)
-
         accuracy.rmse(predictions, verbose=True)
 
-    #model.fit(trainset)
-    #predictions = model.test(testset)
-    #accuracy.rmse(predictions, verbose=True)
     rest_dict = set(rest_data_df['business_id'])
     user_rating_predic = dict()
     for rest in rest_dict:
@@ -587,78 +343,90 @@ def CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id):
     user_rates.columns = ['business_id', 'cf_prediction']
     user_rates = user_rates.sort_values('cf_prediction', ascending=False)
 
-    #based on the first filtering, give the 30 most possible predictions
-    print(user_rates['business_id'].head(30))
-    users_rating_df = users_rating_df[users_rating_df['business_id'].apply(lambda x: x in set(user_rates['business_id'].head(30)))]
-    #print(users_rating_df)
-    #exit()
+    print("Prediction finished")
+    return user_rates
 
-    #second SVD filtering to predict better
-    reader = Reader(rating_scale=(0, 5))  #
+def CF_cal_restaurant_recommend(rest_data_df):
+    top_rest = rest_data_df.sort_values('cf_prediction', ascending=False)
+    recommend_rest = top_rest[['name', 'description', 'cf_prediction']][:10]
+    return recommend_rest
+
+
+def HY_cal_restaurant_recommend(rest_data_df, users_rating_df, user_id):
+    print("Start prediction by CF...")
+    user_watched = set(users_rating_df[users_rating_df['user_id'].apply(lambda x: x == user_id)]['business_id'])
+    rest_dict = set(rest_data_df['business_id'])
+    reader = Reader(rating_scale=(0, 5))
+    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
+
+    # First SVD to filter the unaccerry ratings
+    cross_validation = KFold(n_splits=3)
+    model1 = SVD(n_factors=100)
+
+    for trainset, testset in cross_validation.split(rating_data):
+        model1.fit(trainset)
+        predictions = model1.test(testset)
+        accuracy.rmse(predictions, verbose=True)
+
+    user_rating_pre = dict()
+    for rest in rest_dict:
+        predict = model1.predict(user_id, rest)
+        user_rating_pre[rest] = round(predict.est, 3)
+
+    user_rates = pd.DataFrame(user_rating_pre, index=[0]).transpose().reset_index()
+    user_rates.columns = ['business_id', 'cf_prediction']
+    user_rates = user_rates.sort_values('cf_prediction', ascending=False)
+    users_rating_df = users_rating_df[users_rating_df['business_id'].apply(lambda x: x in set(user_rates['business_id'].head(40)))]
+    del model1
+
+    # second SVD filtering to predict better
+    reader = Reader(rating_scale=(3, 4.5))  #
     rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
 
     # trainset, testset = train_test_split(rating_data, test_size=.25)
     cross_validation = KFold(n_splits=3)
-    model = SVDpp(n_factors=20)
+    model2 = SVDpp(n_factors=20)
 
     for trainset, testset in cross_validation.split(rating_data):
-        model.fit(trainset)
-        predictions = model.test(testset)
-
+        model2.fit(trainset)
+        predictions = model2.test(testset)
         accuracy.rmse(predictions, verbose=True)
 
-    exit()
-
-
-
-    final_df = pd.merge(rest_data_df, user_rates, how='left', on='business_id')
-
-    tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
-
-    tfidf_matrix = tf.fit_transform(rest_data_df['categories'])
-
+    #final_df = pd.merge(rest_data_df, user_rates, how='left', on='business_id')
+    #TF-IDF
+    tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), min_df=0, stop_words='english')
+    tfidf_matrix = tf.fit_transform(rest_data_df['description'])
     cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
-
     matrix_sim = pd.DataFrame(cosine_similar, columns=rest_data_df['business_id'], index=rest_data_df['business_id'])
     rank = {}
-    print(user_watched)
+    #recommend prediction
     for rest in rest_dict:
         for bus_id in user_watched:
             score = 0
-            predict = model.predict(user_id, rest)
-            p_v = round(predict.est,3)
-            if bus_id == rest:
+            predict = model2.predict(user_id, rest)
+            p_v = round(predict.est, 3)
+            sim = matrix_sim[bus_id][rest]
+            if bus_id == rest or sim == 0:
                 continue
             else:
-                sim = matrix_sim[bus_id][rest]
-                score += (p_v*sim)/abs(sim)
-        score = round(score/len(user_watched), 3)
+                score += (p_v * sim) / abs(sim)
+        score = round(score / len(user_watched), 3)
         rank[rest] = score
 
+    del model2
     hybrid_rates = pd.DataFrame(rank, index=[0]).transpose().reset_index()
     del rank
     hybrid_rates.columns = ['business_id', 'hy_rate']
     final_df = pd.merge(rest_data_df, hybrid_rates, how='left', on='business_id')
     top_rest = final_df.sort_values('hy_rate', ascending=False)
-    recommend_rest = top_rest[['name', 'categories', 'hy_rate']][:10]
-    print(recommend_rest)
-
-
-
-    print("Prediction finished")
-    return final_df
-
-def CF_cal_restaurant_recommend(rest_data_df):
-    top_rest = rest_data_df.sort_values('cf_prediction', ascending=False)
-    recommend_rest = top_rest[['name', 'categories', 'cf_prediction']][:10]
+    recommend_rest = top_rest[['name', 'description', 'hy_rate']][:10]
     return recommend_rest
-
 
 def CB_cal_restaurant_recommend(restaurant, visited):
     print("Starting recommend...")
     tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
 
-    tfidf_matrix = tf.fit_transform(restaurant['categories'])
+    tfidf_matrix = tf.fit_transform(restaurant['description'])
 
     cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
 
@@ -679,40 +447,37 @@ def CB_cal_restaurant_recommend(restaurant, visited):
     top_rest = rec_df.merge(restaurant, how='left', on='business_id')
     #top_rest = top_rest.sort_values('ra_average', ascending=False)
     top_rest = top_rest.sort_values('cb_ra_weight', ascending=False)
-    recommend_rest = top_rest[['name', 'categories', 'cb_ra_weight', 'ra_average']][:10]
+    recommend_rest = top_rest[['name', 'description', 'cb_ra_weight', 'ra_average']][:10]
     return recommend_rest
 
 
-#users_group = restaurant_user_finder(user_id)
-#review_group, restaurant_reviews_average = restaurant_review_finder(users_group)
-#feature_group, feature = restaurant_feature_finder()
-#categories_group, categories = restaurant_categories_finder()
-#review_matrix = building_review_matrix(review_group, restaurant_reviews_average)
-#feature_matrix = building_restaurant_feature_matrix(feature_group, feature)
-#categories_matrix = building_restaurant_categories_matrix(categories_group, categories)
-#restaurant_tips_finder()
-#restaurant_rating_average, rest = restaurant_rating_average_finder()
-#restaurant_description, rests = restaurant_tips_categories_combiner(rest)
 
 if __name__ == '__main__':
     #CB recommender
     visited = {'xfWdUmrz2ha3rcigyITV0g': 1, 'OETh78qcgDltvHULowwhJg': 1, '4JNXUYY8wbaaDmk3BPzlWw': 1, 'sKA6EOpxvBtCg7Ipuhl1RQ': 1}
-    rest_data_df = csv_restaurant_categories_combiner()
+    rest_data_df = csv_restaurant_categories_collect()
     covid_info_df = csv_covid_info_collect(rest_data_df['business_id'])
     rest_data_df = pd.merge(covid_info_df, rest_data_df, how='left', on='business_id')
+    combination_df = csv_tips_cocategories_combination(rest_data_df[['business_id', 'categories']])
+    rest_data_df = pd.merge(rest_data_df, combination_df, how='left', on='business_id')
+    #rest_description = restaurant_description(rest_data_df[['business_id', 'tips', 'categories']])
     rating_average_df, users_review, users_rating = csv_restaurant_rating_average(set(rest_data_df['business_id']))
     rest_data_df = pd.merge(rating_average_df, rest_data_df, how='left', on='business_id')
     top_10_restaurant = CB_cal_restaurant_recommend(rest_data_df, visited)
-    print(top_10_restaurant)
+    print("CB:", top_10_restaurant)
     #user_features_df = csv_user_collecting(users_review, set(rest_data_df['business_id']))
 
     #CF recommender
     user_id = 'yPv39tqbBwsiMj6M7hQjWQ'
     users_rating_df = user_rating_filtering(users_rating, set(rest_data_df['business_id']))
-    rest_data_df = CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id)
-    #top_10_restaurant = CF_cal_restaurant_recommend(rest_data_df)
-    #print(top_10_restaurant)
-    #restaurant = pd.merge(rating_average_with_weight_df, restaurant_info_df, how='left', on='business_id')
+    cf_rest_data_df = CF_SVD_rating_prediction(rest_data_df, users_rating_df, user_id)
+    rest_data_df = pd.merge(rest_data_df, cf_rest_data_df, how='left', on='business_id')
+    top_10_restaurant = CF_cal_restaurant_recommend(rest_data_df)
+    print("CF:", top_10_restaurant)
+
+    #Hybrid recommender
+    top_10_restaurant = HY_cal_restaurant_recommend(rest_data_df, users_rating_df, user_id)
+    print("HY:", top_10_restaurant)
     #visited = user_visited(user_id)
     #print(restaurant)
 
