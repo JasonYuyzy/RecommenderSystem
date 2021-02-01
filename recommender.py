@@ -418,10 +418,12 @@ def train(epoch):
     RMSE = 0
     cost_all = 0
     for step, (batch_x, batch_mask_x, batch_y) in enumerate(loader):
-        # batch_x = batch_x.type(torch.FloatTensor).cuda()
-        # batch_mask_x = batch_mask_x.type(torch.FloatTensor).cuda()
-        batch_x = batch_x.type(torch.FloatTensor)
-        batch_mask_x = batch_mask_x.type(torch.FloatTensor)
+        if args.cuda == True:
+            batch_x = batch_x.type(torch.FloatTensor).cuda()
+            batch_mask_x = batch_mask_x.type(torch.FloatTensor).cuda()
+        else:
+            batch_x = batch_x.type(torch.FloatTensor)
+            batch_mask_x = batch_mask_x.type(torch.FloatTensor)
 
         decoder = rec(batch_x)
         loss, rmse = rec.loss(decoder=decoder, input=batch_x, optimizer=optimer, mask_input=batch_mask_x)
@@ -435,13 +437,16 @@ def train(epoch):
     print('epoch ', epoch, ' train RMSE : ', RMSE)
 
 def test(epoch):
-    # test_r_tensor = torch.from_numpy(test_r).type(torch.FloatTensor).cuda()
-    # test_mask_r_tensor = torch.from_numpy(test_mask_r).type(torch.FloatTensor).cuda()
-    test_r_tensor = torch.from_numpy(test_r).type(torch.FloatTensor)
-    test_mask_r_tensor = torch.from_numpy(test_mask_r).type(torch.FloatTensor)
+    if args.cuda == True:
+        test_r_tensor = torch.from_numpy(test_r).type(torch.FloatTensor).cuda()
+        test_mask_r_tensor = torch.from_numpy(test_mask_r).type(torch.FloatTensor).cuda()
+    else:
+        test_r_tensor = torch.from_numpy(test_r).type(torch.FloatTensor)
+        test_mask_r_tensor = torch.from_numpy(test_mask_r).type(torch.FloatTensor)
 
     decoder = rec(test_r_tensor)
-    # decoder = torch.from_numpy(np.clip(decoder.detach().cpu().numpy(),a_min=1,a_max=5)).cuda()
+    if args.cuda == True:
+        decoder = torch.from_numpy(np.clip(decoder.detach().cpu().numpy(),a_min=1,a_max=5)).cuda()
 
     unseen_user_test_list = list(user_test_set - user_train_set)  # the user list not in training list
     unseen_item_test_list = list(item_test_set - item_train_set)  # the restaurant list not in training list
