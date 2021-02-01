@@ -1,12 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from torch.autograd import variable
-import math
-import time
-import argparse
-import torch.utils.data as Data
-import torch.optim as optim
 
 class Autorec(nn.Module):
     def __init__(self, args, num_users, num_items):
@@ -56,8 +50,11 @@ class Autorec(nn.Module):
         state_dict = torch.load(path, map_location=map_location)
         self.load_state_dict(state_dict, strict=False)
 
-    def recommend_user(self, r_u, N):
+    def recommend_user(self, r_u):
+        p_rate_dict = dict()
         predict = self.forward(torch.from_numpy(r_u).float())
         predict = predict.detach().numpy()
-        indexs = np.argsort(-predict)[:N]
-        return indexs, predict
+        for i in range(len(predict)):
+            p_rate_dict[i] = predict[i]
+
+        return p_rate_dict
