@@ -15,7 +15,7 @@ p1 = progressbar.ProgressBar()
 
 def rating_dataloader():
     print("Collecting the reviews data...")
-    reviews = pd.read_csv("./data_file/reviews.csv")[['review_id', 'user_id', 'business_id', 'stars', 'date']]
+    reviews = pd.read_csv("./data_file/review_bars.csv")[['review_id', 'user_id', 'business_id', 'stars', 'date']]
     reviews = reviews[reviews['date'].apply(lambda x: int(x.split('-')[0]) > 2018)]
     business = dict()
     users_train = dict()

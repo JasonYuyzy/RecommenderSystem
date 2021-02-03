@@ -7,7 +7,7 @@ import progressbar
 import random
 import time, datetime
 from ast import literal_eval
-from train import train_model
+#from train import train_model
 
 
 from surprise import SVD, SVDpp
@@ -39,13 +39,13 @@ user_id = 'QaELAmRcDc5TfJEylaaP8g'
 
 def csv_restaurant_categories_collect():
     print("Start collecting the restaurants' information...")
-    restaurant = pd.read_csv('./data_file/restaurant.csv')[['business_id', 'name', 'categories','is_open', 'review_count']]
+    restaurant = pd.read_csv('./data_file/bars.csv')[['business_id', 'name', 'categories','is_open', 'review_count']]
     restaurant['business_id'].dropna(axis=0)
     restaurant['name'].dropna(axis=0)
     restaurant['categories'].dropna(axis=0)
     restaurant['is_open'].dropna(axis=0)
     restaurant = restaurant[~restaurant['is_open'].isin([0])]
-    restaurant = restaurant[restaurant['review_count'].apply(lambda x: int(x) > 400)]
+    #restaurant = restaurant[restaurant['review_count'].apply(lambda x: int(x) > 400)]
     categories_dic = dict(zip(restaurant['business_id'], restaurant['categories']))
     categories_description = dict()
     p8.start(len(restaurant))
@@ -56,13 +56,14 @@ def csv_restaurant_categories_collect():
         text_lst = text_lst.split(' ')
         text_lst = [word.strip() for word in text_lst if word != "&"]
         text_lst = list(set(text_lst))
+        count += 1
+        p8.update(count)
         if "Food" in text_lst:
             text_lst.remove("Food")
         if "Restaurants" in text_lst:
             text_lst.remove("Restaurants")
         categories_description[rest_id] = str(text_lst)
-        count += 1
-        p8.update(count)
+
 
     name = restaurant.drop(['categories','is_open', 'review_count'], axis=1)
     del text_lst
@@ -86,7 +87,7 @@ def csv_tips_cocategories_combination(rest_dict):
     print("Collecting the tips info...")
     stemmer = SnowballStemmer('english')
     stop = set(stopwords.words('english'))
-    tips_df = pd.read_csv('./data_file/tips.csv')
+    tips_df = pd.read_csv('./data_file/tip_bars.csv')
     tips_df['text'].dropna(axis=0)
     categories_dict = dict(zip(rest_dict['business_id'], rest_dict['categories']))
         #print(type(eval(categories_dict[i])))
@@ -136,16 +137,25 @@ def csv_tips_cocategories_combination(rest_dict):
 
 def csv_covid_info_collect(restaurant_dcit):
     print("Collecting the covid information...")
-    covid = pd.read_csv('./data_file/covid_19.csv')
-    rest_covid_info = covid[covid.apply(covid_filtering, axis=1, args=(today.year, today.month))]
+    covid = pd.read_csv('./data_file/covid_bars.csv')
+    rest_covid_info = covid[covid.apply(covid_filtering_open_date, axis=1, args=(today.year, today.month))]
+    print(rest_covid_info)
+    rest_covid_info = rest_covid_info.replace({True: 1, False: 0})#, inplace=True)
+
     rest_covid_info = pd.merge(restaurant_dcit, rest_covid_info, how='left', on='business_id')
+    del rest_covid_info['Covid Banner']
+    del rest_covid_info['Temporary Closed Until']
+    del rest_covid_info['Virtual Services Offered']
+    print(rest_covid_info)
+    print(len(restaurant_dcit))
+    exit()
     rest_covid_info.dropna()
     #rest_covid_info['review_id'].dropna(axis=0)
     #rest_covid_info['business_id'].dropna(axis=0)
     #rest_covid_info['stars'].dropna(axis=0)
     print("Covid info collected")
     return rest_covid_info
-def covid_filtering(covid_info, year, month):
+def covid_filtering_open_date(covid_info, year, month):
     date_check = covid_info['Temporary Closed Until'].split('-')
     if len(date_check) == 1:
         return True
@@ -156,7 +166,7 @@ def covid_filtering(covid_info, year, month):
 
 def csv_restaurant_rating_average(restaurant_dcit):
     print("Start collecting the restaurants' rating average...")
-    reviews = pd.read_csv('./data_file/reviews.csv')[['review_id', 'business_id', 'stars', 'date', 'user_id']]
+    reviews = pd.read_csv('./data_file/review_bars.csv')[['review_id', 'business_id', 'stars', 'date', 'user_id']]
     reviews['date'].dropna(axis=0)
     reviews['review_id'].dropna(axis=0)
     reviews['business_id'].dropna(axis=0)
@@ -230,7 +240,7 @@ def user_rating_filtering(users_review, rest_dict):
 
 def csv_user_collecting(restaurant_dcit, rest_dict):
     print('Start collecting user rating matrix...')
-    user = pd.read_csv('./data_file/users.csv')[['user_id', 'review_count', 'restaurant_review_count']]
+    user = pd.read_csv('./data_file/user_bars.csv')[['user_id', 'review_count', 'restaurant_review_count']]
     #user = user[user['restaurant_review_count'].apply(lambda x: int(x) >= 100)]
     kf = KFold(n_splits=5, shuffle=True)
     user = user.sort_values('restaurant_review_count', ascending=False)
@@ -411,10 +421,11 @@ if __name__ == '__main__':
     is_train = False
     u_id = '5VESqAgYsL9vzLEIA_xgnw'
     #CB recommender
-    #visited = {'xfWdUmrz2ha3rcigyITV0g': 1, 'OETh78qcgDltvHULowwhJg': 1, '4JNXUYY8wbaaDmk3BPzlWw': 1, 'sKA6EOpxvBtCg7Ipuhl1RQ': 1}
-    #rest_data_df = csv_restaurant_categories_collect()
-    #covid_info_df = csv_covid_info_collect(rest_data_df['business_id'])
-    #rest_data_df = pd.merge(covid_info_df, rest_data_df, how='left', on='business_id')
+    visited = {'xfWdUmrz2ha3rcigyITV0g': 1, 'OETh78qcgDltvHULowwhJg': 1, '4JNXUYY8wbaaDmk3BPzlWw': 1, 'sKA6EOpxvBtCg7Ipuhl1RQ': 1}
+    rest_data_df = csv_restaurant_categories_collect()
+    covid_info_df = csv_covid_info_collect(rest_data_df['business_id'])
+    rest_data_df = pd.merge(covid_info_df, rest_data_df, how='left', on='business_id')
+    print(rest_data_df)
     #combination_df = csv_tips_cocategories_combination(rest_data_df[['business_id', 'categories']])
     #rest_data_df = pd.merge(rest_data_df, combination_df, how='left', on='business_id')
     #rating_average_df, users_review, users_rating = csv_restaurant_rating_average(set(rest_data_df['business_id']))
@@ -442,7 +453,7 @@ if __name__ == '__main__':
     #print(restaurant)
 
     #DL training recommender
-    p_rate_dict = train_model(is_train, u_id)
-    DL_prate_df = pd.DataFrame(p_rate_dict, index=[0]).transpose().reset_index()
-    DL_prate_df.columns = ['business_id', 'dl_prate']
-    print(DL_prate_df)
+    #p_rate_dict = train_model(is_train, u_id)
+    #DL_prate_df = pd.DataFrame(p_rate_dict, index=[0]).transpose().reset_index()
+    #DL_prate_df.columns = ['business_id', 'dl_prate']
+    #print(DL_prate_df)
