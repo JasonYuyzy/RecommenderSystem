@@ -228,23 +228,10 @@ def CF_cal_bar_simulation(views_dict):
     #print(bars_sim_matrix)
     return bars_sim_matrix
 
-def CB_CF_sim_combine(CF_sim_matrix, CB_sim_matrix, bar_set):
-    print("Calculating the final weight")
-    final_sim_matrix = dict()
-
-    p10.start(len(bar_set) ** 2)
-    count = 0
-    for b1 in bar_set:
-        final_sim_matrix[b1] = {}
-        for b2 in bar_set:
-            final_sim_matrix[b1].update({b2: CB_sim_matrix[b1][b2]})
-            count += 1
-            p10.update(count)
 
 
-    print("Final similarity finished")
-    print(final_sim_matrix)
-    return final_sim_matrix
+
+
 
 def csv_bar_rating_average(bar_dcit):
     print("Start collecting the bars' rating average...")
@@ -481,7 +468,6 @@ if __name__ == '__main__':
     CF_sim_matrix = CF_cal_bar_simulation(user_rate_account_dict)
     #rating_average_df, users_review, users_rating = csv_bar_rating_average(set(bar_data_df['business_id']))
     CB_sim_matrix = CB_cal_bar_simulation(bar_data_df, visited)
-    final_bar_sim = CB_CF_sim_combine(CF_sim_matrix, CB_sim_matrix, set(bar_data_df['business_id']))
     exit()
     #print("CB:", CB_sim_matrix)
 
