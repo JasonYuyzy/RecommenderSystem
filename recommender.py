@@ -7,7 +7,7 @@ import progressbar
 import random
 import time, datetime
 from ast import literal_eval
-#from train import train_model
+from train import train_model
 
 
 from surprise import SVD, SVDpp
@@ -228,10 +228,106 @@ def CF_cal_bar_simulation(views_dict):
     #print(bars_sim_matrix)
     return bars_sim_matrix
 
+def recommender(CB_sim_matrix, CF_sim_matrix, DL_prate_df, bar_data_df, reviewed):
+    print("Start racommending...")
+    bar_set = set(bar_data_df['business_id'])
+    prate = dict()
+    for bar in bar_set:
+        for visited in reviewed:
+            if visited == bar:
+                continue
+            score = 0
+            p_rate = DL_prate_df[bar]
+            if visited not in CF_sim_matrix or bar not in CF_sim_matrix[visited]:
+                sim = CB_sim_matrix[visited][bar]
+            else:
+                sim = CB_sim_matrix[visited][bar] * 0.6 + CF_sim_matrix[visited][bar] * 0.4
+
+            score += (p_rate * sim) / abs(sim)
+        score = round(score / len(reviewed), 3)
+        prate[bar] = score
+
+    hybrid_rates = pd.DataFrame(prate, index=[0]).transpose().reset_index()
+    del prate
+    hybrid_rates.columns = ['business_id', 'hy_rate']
+    final_df = pd.merge(bar_data_df, hybrid_rates, how='left', on='business_id')
+    top_bar = final_df.sort_values('hy_rate', ascending=False)
+    recommend_bar = top_bar[['name', 'description', 'highlights']][:10]
+    return recommend_bar
 
 
 
 
+
+def HY_cal_bar_recommend(bar_data_df, users_rating_df, user_id):
+    print("Start prediction by CF...")
+    user_watched = set(users_rating_df[users_rating_df['user_id'].apply(lambda x: x == user_id)]['business_id'])
+    bar_dict = set(bar_data_df['business_id'])
+    reader = Reader(rating_scale=(0, 5))
+    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
+
+    # First SVD to filter the unaccerry ratings
+    cross_validation = KFold(n_splits=3)
+    model1 = SVD(n_factors=100)
+
+    for trainset, testset in cross_validation.split(rating_data):
+        model1.fit(trainset)
+        predictions = model1.test(testset)
+        accuracy.rmse(predictions, verbose=True)
+
+    user_rating_pre = dict()
+    for bar in bar_dict:
+        predict = model1.predict(user_id, bar)
+        user_rating_pre[bar] = round(predict.est, 3)
+
+    user_rates = pd.DataFrame(user_rating_pre, index=[0]).transpose().reset_index()
+    user_rates.columns = ['business_id', 'cf_prediction']
+    user_rates = user_rates.sort_values('cf_prediction', ascending=False)
+    users_rating_df = users_rating_df[users_rating_df['business_id'].apply(lambda x: x in set(user_rates['business_id'].head(40)))]
+    del model1
+
+    # second SVD filtering to predict better
+    reader = Reader(rating_scale=(3, 4.5))  #
+    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
+
+    # trainset, testset = train_test_split(rating_data, test_size=.25)
+    cross_validation = KFold(n_splits=3)
+    model2 = SVDpp(n_factors=20)
+
+    for trainset, testset in cross_validation.split(rating_data):
+        model2.fit(trainset)
+        predictions = model2.test(testset)
+        accuracy.rmse(predictions, verbose=True)
+
+    #final_df = pd.merge(bar_data_df, user_rates, how='left', on='business_id')
+    #TF-IDF
+    tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), min_df=0, stop_words='english')
+    tfidf_matrix = tf.fit_transform(bar_data_df['description'])
+    cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
+    matrix_sim = pd.DataFrame(cosine_similar, columns=bar_data_df['business_id'], index=bar_data_df['business_id'])
+    rank = {}
+    #recommend prediction
+    for bar in bar_dict:
+        for bus_id in user_watched:
+            score = 0
+            predict = model2.predict(user_id, bar)
+            p_v = round(predict.est, 3)
+            sim = matrix_sim[bus_id][bar]
+            if bus_id == bar or sim == 0:
+                continue
+            else:
+                score += (p_v * sim) / abs(sim)
+        score = round(score / len(user_watched), 3)
+        rank[bar] = score
+
+    del model2
+    hybrid_rates = pd.DataFrame(rank, index=[0]).transpose().reset_index()
+    del rank
+    hybrid_rates.columns = ['business_id', 'hy_rate']
+    final_df = pd.merge(bar_data_df, hybrid_rates, how='left', on='business_id')
+    top_bar = final_df.sort_values('hy_rate', ascending=False)
+    recommend_bar = top_bar[['name', 'description', 'hy_rate']][:10]
+    return recommend_bar
 
 def csv_bar_rating_average(bar_dcit):
     print("Start collecting the bars' rating average...")
@@ -379,75 +475,6 @@ def CF_cal_bar_recommend(bar_data_df):
     return recommend_bar
 
 
-def HY_cal_bar_recommend(bar_data_df, users_rating_df, user_id):
-    print("Start prediction by CF...")
-    user_watched = set(users_rating_df[users_rating_df['user_id'].apply(lambda x: x == user_id)]['business_id'])
-    bar_dict = set(bar_data_df['business_id'])
-    reader = Reader(rating_scale=(0, 5))
-    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
-
-    # First SVD to filter the unaccerry ratings
-    cross_validation = KFold(n_splits=3)
-    model1 = SVD(n_factors=100)
-
-    for trainset, testset in cross_validation.split(rating_data):
-        model1.fit(trainset)
-        predictions = model1.test(testset)
-        accuracy.rmse(predictions, verbose=True)
-
-    user_rating_pre = dict()
-    for bar in bar_dict:
-        predict = model1.predict(user_id, bar)
-        user_rating_pre[bar] = round(predict.est, 3)
-
-    user_rates = pd.DataFrame(user_rating_pre, index=[0]).transpose().reset_index()
-    user_rates.columns = ['business_id', 'cf_prediction']
-    user_rates = user_rates.sort_values('cf_prediction', ascending=False)
-    users_rating_df = users_rating_df[users_rating_df['business_id'].apply(lambda x: x in set(user_rates['business_id'].head(40)))]
-    del model1
-
-    # second SVD filtering to predict better
-    reader = Reader(rating_scale=(3, 4.5))  #
-    rating_data = Dataset.load_from_df(users_rating_df, reader=reader)
-
-    # trainset, testset = train_test_split(rating_data, test_size=.25)
-    cross_validation = KFold(n_splits=3)
-    model2 = SVDpp(n_factors=20)
-
-    for trainset, testset in cross_validation.split(rating_data):
-        model2.fit(trainset)
-        predictions = model2.test(testset)
-        accuracy.rmse(predictions, verbose=True)
-
-    #final_df = pd.merge(bar_data_df, user_rates, how='left', on='business_id')
-    #TF-IDF
-    tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 3), min_df=0, stop_words='english')
-    tfidf_matrix = tf.fit_transform(bar_data_df['description'])
-    cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
-    matrix_sim = pd.DataFrame(cosine_similar, columns=bar_data_df['business_id'], index=bar_data_df['business_id'])
-    rank = {}
-    #recommend prediction
-    for bar in bar_dict:
-        for bus_id in user_watched:
-            score = 0
-            predict = model2.predict(user_id, bar)
-            p_v = round(predict.est, 3)
-            sim = matrix_sim[bus_id][bar]
-            if bus_id == bar or sim == 0:
-                continue
-            else:
-                score += (p_v * sim) / abs(sim)
-        score = round(score / len(user_watched), 3)
-        rank[bar] = score
-
-    del model2
-    hybrid_rates = pd.DataFrame(rank, index=[0]).transpose().reset_index()
-    del rank
-    hybrid_rates.columns = ['business_id', 'hy_rate']
-    final_df = pd.merge(bar_data_df, hybrid_rates, how='left', on='business_id')
-    top_bar = final_df.sort_values('hy_rate', ascending=False)
-    recommend_bar = top_bar[['name', 'description', 'hy_rate']][:10]
-    return recommend_bar
 
 
 
@@ -471,27 +498,10 @@ if __name__ == '__main__':
     exit()
     #print("CB:", CB_sim_matrix)
 
-    #DL data testing
-    #user_features_df = csv_user_collecting(users_review, set(bar_data_df['business_id']))
-    #print(user_features_df)
-    #exit()
-
-    #CF recommender
-    #user_id = 'yPv39tqbBwsiMj6M7hQjWQ'
-    #users_rating_df = user_rating_filtering(users_rating, set(bar_data_df['business_id']))
-    #cf_bar_data_df = CF_SVD_rating_prediction(bar_data_df, users_rating_df, user_id)
-    #bar_data_df = pd.merge(bar_data_df, cf_bar_data_df, how='left', on='business_id')
-    #top_10_bar = CF_cal_bar_recommend(bar_data_df)
-    #print("CF:", top_10_bar)
-
-    #Hybrid recommender
-    #top_10_bar = HY_cal_bar_recommend(bar_data_df, users_rating_df, user_id)
-    #print("HY:", top_10_bar)
-    #visited = user_visited(user_id)
-    #print(bar)
-
-    #DL training recommender
-    #p_rate_dict = train_model(is_train, u_id)
-    #DL_prate_df = pd.DataFrame(p_rate_dict, index=[0]).transpose().reset_index()
-    #DL_prate_df.columns = ['business_id', 'dl_prate']
-    #print(DL_prate_df)
+    #DL AutoREC training recommender
+    p_rate_dict = train_model(is_train, u_id)
+    DL_prate_df = pd.DataFrame(p_rate_dict, index=[0]).transpose().reset_index()
+    DL_prate_df.columns = ['business_id', 'dl_prate']
+    final_recommender = recommender(CB_sim_matrix, CF_sim_matrix, DL_prate_df, bar_data_df)
+    print("Here is your recommendation:")
+    print(final_recommender)
