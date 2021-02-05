@@ -25,8 +25,8 @@ def rating_dataloader():
     item_train_set = set()
     item_test_set = set()
     for bus_id in set(reviews['business_id']):
-        if len(business) >= 4000:
-            continue
+        #if len(business) >= 4000:
+            #continue
         if bus_id not in business:
             business[bus_id] = len(business)
 
@@ -55,18 +55,18 @@ def rating_dataloader():
     train_mask_r = np.zeros((train_num_users, num_items))
     test_mask_r = np.zeros((test_num_users, num_items))
 
-    reid_restid = dict(zip(reviews['review_id'], reviews['business_id']))
-    reid_restar = dict(zip(reviews['review_id'], reviews['stars']))
+    reid_barid = dict(zip(reviews['review_id'], reviews['business_id']))
+    reid_barar = dict(zip(reviews['review_id'], reviews['stars']))
     reid_userid = dict(zip(reviews['review_id'], reviews['user_id']))
     del reviews
     # training set
-    p1.start(len(reid_restid))
+    p1.start(len(reid_barid))
     count = 0
     total = 0
-    for re_id in reid_restid:
-        b_id = reid_restid[re_id]
+    for re_id in reid_barid:
+        b_id = reid_barid[re_id]
         u_id = reid_userid[re_id]
-        star = int(reid_restar[re_id])
+        star = int(reid_barar[re_id])
         count += 1
         if u_id in users_train and b_id in business:
             train_r[users_train[u_id]][business[b_id]] = star
@@ -87,31 +87,31 @@ def rating_dataloader():
     num_users = len(user_train_set) + len(user_test_set)
     num_items = len(business)
     print("number of users:", num_users)
-    print("number of rest:", num_items)
+    print("number of bar:", num_items)
     print("total of rating:", total)
     dic_new = dict(zip(business.values(), business.keys()))
-    del reid_restid
-    del reid_restar
+    del reid_barid
+    del reid_barar
     del reid_userid
     del business
     #del users_train
     #del users_test
-
+    exit()
     return users_train, users_test, dic_new, num_users, num_items, total, train_r, train_mask_r, test_r, test_mask_r, user_train_set, item_train_set, user_test_set, item_test_set
 
 
 #DL training recommender
 parser = argparse.ArgumentParser(description='I-AutoRec ')
-parser.add_argument('--hidden_units', type=int, default=500)  # hidden unit
+parser.add_argument('--hidden_units', type=int, default=800)  # hidden unit
 parser.add_argument('--lambda_value', type=float, default=1)
 
-parser.add_argument('--train_epoch', type=int, default=3)  # training epoch
-parser.add_argument('--batch_size', type=int, default=800)  # batch_size
+parser.add_argument('--train_epoch', type=int, default=100)  # training epoch
+parser.add_argument('--batch_size', type=int, default=1500)  # batch_size
 
 parser.add_argument('--optimizer_method', choices=['Adam', 'RMSProp'], default='Adam')
 parser.add_argument('--grad_clip', type=bool, default=False)
-parser.add_argument('--base_lr', type=float, default=5e-4)  # learning rate
-parser.add_argument('--decay_epoch_step', type=int, default=70, help="decay the learning rate for each n epochs")
+parser.add_argument('--base_lr', type=float, default=2e-5)  # learning rate
+parser.add_argument('--decay_epoch_step', type=int, default=10, help="decay the learning rate for each n epochs")
 
 parser.add_argument('--random_seed', type=int, default=1000)
 parser.add_argument('--display_step', type=int, default=1)
@@ -174,7 +174,7 @@ def test(epoch):
         decoder = torch.from_numpy(np.clip(decoder.detach().cpu().numpy(),a_min=1,a_max=5)).cuda()
 
     unseen_user_test_list = list(user_test_set - user_train_set)  # the user list not in training list
-    unseen_item_test_list = list(item_test_set - item_train_set)  # the restaurant list not in training list
+    unseen_item_test_list = list(item_test_set - item_train_set)  # the bar list not in training list
 
     for user in unseen_user_test_list:
         for item in unseen_item_test_list:
