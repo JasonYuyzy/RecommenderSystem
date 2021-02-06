@@ -8,6 +8,7 @@ import random
 import time, datetime
 from ast import literal_eval
 from train import train_model
+from operator import itemgetter
 
 
 from surprise import SVD, SVDpp
@@ -35,6 +36,7 @@ p7 = progressbar.ProgressBar()
 p8 = progressbar.ProgressBar()
 p9 = progressbar.ProgressBar()
 p10 = progressbar.ProgressBar()
+p11 = progressbar.ProgressBar()
 
 user_id = 'QaELAmRcDc5TfJEylaaP8g'
 
@@ -138,8 +140,8 @@ def csv_covid_info_collect(bar_dcit):
     bar_covid_info = covid[covid.apply(covid_filtering_open_date, axis=1, args=(today.year, today.month))]
     bar_covid_info = bar_covid_info[bar_covid_info['business_id'].apply(lambda x: x in bar_set)]
     bar_covid_info = bar_covid_info.replace({True: 1, False: 0})
-    bar_covid_info = pd.merge(bar_dcit, bar_covid_info, how='left', on='business_id')
-    del bar_covid_info['Covid Banner']
+    bar_covid_info = bar_covid_info.merge(bar_dcit, how='left', on='business_id')
+    #del bar_covid_info['Covid Banner']
     del bar_covid_info['Temporary Closed Until']
     del bar_covid_info['Virtual Services Offered']
     print("Covid info collected")
@@ -153,30 +155,13 @@ def covid_filtering_open_date(covid_info, year, month):
     else:
         return True
 
-def CB_cal_bar_simulation(bar, visited):
+def CB_cal_bar_simularity(bar):
     print("Calculating bar similarity with CB...")
     tf = TfidfVectorizer(analyzer='word', ngram_range=(1, 2), min_df=0, stop_words='english')
     tfidf_matrix = tf.fit_transform(bar['description'])
     cosine_similar = linear_kernel(tfidf_matrix, tfidf_matrix)
     matrix_sim = pd.DataFrame(cosine_similar, columns=bar['business_id'], index=bar['business_id'])
-    #predicting the bar
-    #rec = set()
-    #count = 0
-    #p6.start(len(visited))
-    #for visited_id in visited:
-        #count += 1
-        #if visited_id in matrix_sim.columns:
-            #num_sim = list(matrix_sim.sort_values(visited_id, ascending=False).index[1:10])
-            #for i in num_sim:
-                #if i not in visited:
-                    #rec.add(i)
-        #p6.update(count)
 
-    #rec_df = pd.DataFrame(list(rec), columns=['business_id'])
-    #top_bar = rec_df.merge(bar, how='left', on='business_id')
-    #top_bar = top_bar.sort_values('ra_average', ascending=False)
-    #top_bar = top_bar.sort_values('cb_ra_weight', ascending=False)
-    #recommend_bar = top_bar[['name', 'description', 'cb_ra_weight', 'ra_average']][:10]
     print('Similarity CB finished')
     return matrix_sim
 
@@ -200,7 +185,7 @@ def user_rating_account(bar_set):
 
     return users_review
 
-def CF_cal_bar_simulation(views_dict):
+def CF_cal_bar_simularity(views_dict):
     print("Calculating bar similarity with CF...")
     bars_sim_matrix = dict()
     bars_popularity = dict()
@@ -228,31 +213,80 @@ def CF_cal_bar_simulation(views_dict):
     #print(bars_sim_matrix)
     return bars_sim_matrix
 
-def recommender(CB_sim_matrix, CF_sim_matrix, DL_prate_df, bar_data_df, reviewed):
+def recommender(CB_sim_matrix, CF_sim_matrix, DL_prate_dict, bar_data_df, reviewed, targets):
     print("Start racommending...")
     bar_set = set(bar_data_df['business_id'])
     prate = dict()
     for bar in bar_set:
-        for visited in reviewed:
-            if visited == bar:
+        if bar not in DL_prate_dict:
+            continue
+        P_rate = 0
+        count = 0
+        for re_bar in reviewed:
+            if bar == re_bar:
                 continue
-            score = 0
-            p_rate = DL_prate_df[bar]
-            if visited not in CF_sim_matrix or bar not in CF_sim_matrix[visited]:
-                sim = CB_sim_matrix[visited][bar]
-            else:
-                sim = CB_sim_matrix[visited][bar] * 0.6 + CF_sim_matrix[visited][bar] * 0.4
-
-            score += (p_rate * sim) / abs(sim)
-        score = round(score / len(reviewed), 3)
-        prate[bar] = score
+            try:
+                sim_cf = CF_sim_matrix[re_bar][bar]
+            except:
+                sim_cf = CB_sim_matrix[re_bar][bar]
+            cb_sim = CB_sim_matrix[re_bar][bar]
+            sim = cb_sim * 0.7 + sim_cf * 0.3
+            if sim == 0:
+                continue
+            dl_rate = DL_prate_dict[bar]
+            P_rate += (sim * dl_rate) / abs(sim)
+            count += 1
+        if count == 0:
+            prate[bar] = 0
+        else:
+            prate[bar] = round((P_rate / count), 3)
 
     hybrid_rates = pd.DataFrame(prate, index=[0]).transpose().reset_index()
     del prate
     hybrid_rates.columns = ['business_id', 'hy_rate']
     final_df = pd.merge(bar_data_df, hybrid_rates, how='left', on='business_id')
     top_bar = final_df.sort_values('hy_rate', ascending=False)
-    recommend_bar = top_bar[['name', 'description', 'highlights']][:10]
+    recommend_bar = top_bar[['name', 'categories', 'hy_rate']][:targets]
+    return recommend_bar
+
+def recommender2(CB_sim_matrix, CF_sim_matrix, reviewed, targets):
+    print("Start combine similarity...")
+    CF_result = dict()
+    for b_id, rating in reviewed.items():
+        cf_n_sim = sorted(CF_sim_matrix[b_id].items(), key=itemgetter(1), reverse=True)
+        for m, similarity in cf_n_sim:
+            if m not in reviewed:
+                CF_result.setdefault(m, 0)
+                CF_result[m] += similarity * float(rating)
+
+    for cf_id in CF_result:
+        for b_id in reviewed:
+            CB_sim_matrix[b_id][cf_id] = CB_sim_matrix[b_id][cf_id] * 0.7 + CF_result[cf_id] * 0.3
+
+    final_sim_matrix = CB_sim_matrix.copy()
+
+    return final_sim_matrix
+
+def final_recommender(bar_data_df, final_sim_matrix, reviewed, targets, delivery_option):
+    print("Getting the final recommender...")
+    recommend = set()
+    for bar_id in reviewed:
+        if bar_id in final_sim_matrix.columns:
+            CB_n_sim = list(final_sim_matrix.sort_values(bar_id, ascending=False).index[1:targets * 2])
+            for i in CB_n_sim:
+                if i not in reviewed:
+                    recommend.add(i)
+
+    final_df = pd.DataFrame(list(recommend), columns=['business_id'])
+    if delivery_option:
+        bar_data_df = bar_data_df[bar_data_df['delivery or takeout'].apply(lambda x: x == 1)]
+    else:
+        bar_data_df = bar_data_df[bar_data_df['delivery or takeout'].apply(lambda x: x == 0)]
+
+    top_bars = final_df.merge(bar_data_df, how='left', on='business_id')
+    top_bars = top_bars.sort_values('dl_rate', ascending=False)
+    recommend_bar = top_bars[['name', 'categories', 'dl_rate', 'delivery or takeout', 'Covid Banner']][:targets]
+
     return recommend_bar
 
 
@@ -481,9 +515,13 @@ def CF_cal_bar_recommend(bar_data_df):
 
 if __name__ == '__main__':
     is_train = False
+    u_id = input("Please input the user id:")
+    targets = int(input("How many bars you want to recommended:"))
+    delivery_option = int(input("Eat in or take-away/delivery: 0 eat-in, 1 take-away/delivery"))
     u_id = '5VESqAgYsL9vzLEIA_xgnw'
+    targets = 10
     #CB recommender
-    visited = {'xfWdUmrz2ha3rcigyITV0g': 1, 'OETh78qcgDltvHULowwhJg': 1, '4JNXUYY8wbaaDmk3BPzlWw': 1, 'sKA6EOpxvBtCg7Ipuhl1RQ': 1}
+    #visited = {'xfWdUmrz2ha3rcigyITV0g': 1, 'OETh78qcgDltvHULowwhJg': 1, '4JNXUYY8wbaaDmk3BPzlWw': 1, 'sKA6EOpxvBtCg7Ipuhl1RQ': 1}
     bar_data_df = csv_bar_categories_collect()
     covid_info_df = csv_covid_info_collect(bar_data_df['business_id'])
     bar_data_df = pd.merge(covid_info_df, bar_data_df, how='left', on='business_id')
@@ -492,16 +530,20 @@ if __name__ == '__main__':
     bar_data_df['categories'] = bar_data_df['categories'].apply(literal_eval)
     bar_data_df['categories'] = bar_data_df['categories'].apply(lambda x: ' '.join(x))
     user_rate_account_dict = user_rating_account(set(bar_data_df['business_id']))
-    CF_sim_matrix = CF_cal_bar_simulation(user_rate_account_dict)
-    #rating_average_df, users_review, users_rating = csv_bar_rating_average(set(bar_data_df['business_id']))
-    CB_sim_matrix = CB_cal_bar_simulation(bar_data_df, visited)
-    exit()
-    #print("CB:", CB_sim_matrix)
-
+    visited = user_rate_account_dict[u_id]
+    CF_sim_matrix = CF_cal_bar_simularity(user_rate_account_dict)
+    CB_sim_matrix = CB_cal_bar_simularity(bar_data_df)
     #DL AutoREC training recommender
-    p_rate_dict = train_model(is_train, u_id)
-    DL_prate_df = pd.DataFrame(p_rate_dict, index=[0]).transpose().reset_index()
-    DL_prate_df.columns = ['business_id', 'dl_prate']
-    final_recommender = recommender(CB_sim_matrix, CF_sim_matrix, DL_prate_df, bar_data_df)
+    p_rate_dict = train_model(is_train, u_id, set(bar_data_df['business_id']))
+    p_rate_df = pd.DataFrame(p_rate_dict, index=[0]).transpose().reset_index()
+    p_rate_df.columns = ['business_id', 'dl_rate']
+    bar_data_df = bar_data_df.merge(p_rate_df, how='left', on='business_id')
+    #bar_data_df = recommender(CB_sim_matrix, CF_sim_matrix, p_rate_dict, bar_data_df, visited, targets)
+    final_sim_matrix = recommender2(CB_sim_matrix, CF_sim_matrix, visited, targets)
+    final_recommend = final_recommender(bar_data_df, final_sim_matrix, visited, targets, delivery_option)
     print("Here is your recommendation:")
-    print(final_recommender)
+    print(final_recommend)
+
+
+    #rating_average_df, users_review, users_rating = csv_bar_rating_average(set(bar_data_df['business_id']))
+
