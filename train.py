@@ -12,11 +12,11 @@ from model import Autorec
 
 p1 = progressbar.ProgressBar()
 
-
-def rating_dataloader():
+def rating_dataloader(bar_set):
     print("Collecting the reviews data...")
     reviews = pd.read_csv("./data_file/review_bars.csv")[['review_id', 'user_id', 'business_id', 'stars', 'date']]
     reviews = reviews[reviews['date'].apply(lambda x: int(x.split('-')[0]) > 2018)]
+    #reviews = reviews[reviews['business_id'].apply(lambda x: x in bar_set)]
     business = dict()
     users_train = dict()
     users_test = dict()
@@ -96,50 +96,9 @@ def rating_dataloader():
     del business
     #del users_train
     #del users_test
-    exit()
     return users_train, users_test, dic_new, num_users, num_items, total, train_r, train_mask_r, test_r, test_mask_r, user_train_set, item_train_set, user_test_set, item_test_set
 
-
-#DL training recommender
-parser = argparse.ArgumentParser(description='I-AutoRec ')
-parser.add_argument('--hidden_units', type=int, default=800)  # hidden unit
-parser.add_argument('--lambda_value', type=float, default=1)
-
-parser.add_argument('--train_epoch', type=int, default=100)  # training epoch
-parser.add_argument('--batch_size', type=int, default=1500)  # batch_size
-
-parser.add_argument('--optimizer_method', choices=['Adam', 'RMSProp'], default='Adam')
-parser.add_argument('--grad_clip', type=bool, default=False)
-parser.add_argument('--base_lr', type=float, default=2e-5)  # learning rate
-parser.add_argument('--decay_epoch_step', type=int, default=10, help="decay the learning rate for each n epochs")
-
-parser.add_argument('--random_seed', type=int, default=1000)
-parser.add_argument('--display_step', type=int, default=1)
-
-args = parser.parse_args()
-np.random.seed(args.random_seed)
-users_train, users_test, dict_new, num_users, num_items, num_total_ratings, train_r, train_mask_r, test_r, test_mask_r, user_train_set, item_train_set, user_test_set, item_test_set = rating_dataloader()
-rec = Autorec(args, num_users, num_items)
-
-if torch.cuda.is_available():
-    args.cuda = True
-    rec.cuda()
-else:
-    args.cuda = False
-
-optimer = optim.Adam(rec.parameters(), lr=args.base_lr, weight_decay=1e-4)
-
-num_batch = int(math.ceil(num_users / args.batch_size))
-
-torch_dataset = Data.TensorDataset(torch.from_numpy(train_r), torch.from_numpy(train_mask_r), torch.from_numpy(train_r))
-loader = Data.DataLoader(
-    dataset=torch_dataset,
-    batch_size=args.batch_size,
-    shuffle=True
-)
-
-
-def train(epoch):
+def train(epoch, loader, args, rec, optimer, train_mask_r):
     RMSE = 0
     cost_all = 0
     for step, (batch_x, batch_mask_x, batch_y) in enumerate(loader):
@@ -161,7 +120,7 @@ def train(epoch):
     RMSE = np.sqrt(RMSE.detach().cpu().numpy() / (train_mask_r == 1).sum())
     print('epoch ', epoch, ' train RMSE : ', RMSE)
 
-def test(epoch):
+def test(epoch, args, rec, test_r, test_mask_r, user_test_set, user_train_set, item_test_set, item_train_set):
     if args.cuda == True:
         test_r_tensor = torch.from_numpy(test_r).type(torch.FloatTensor).cuda()
         test_mask_r_tensor = torch.from_numpy(test_mask_r).type(torch.FloatTensor).cuda()
@@ -190,16 +149,53 @@ def test(epoch):
     if epoch == args.train_epoch:
         rec.saveModel('./AutoRec.model')
 
-def train_model(is_train, u_id):
+def train_model(is_train, u_id, bar_set):
+    users_train, users_test, dict_new, num_users, num_items, num_total_ratings, train_r, train_mask_r, test_r, test_mask_r, user_train_set, item_train_set, user_test_set, item_test_set = rating_dataloader(bar_set)
+    parser = argparse.ArgumentParser(description='I-AutoRec ')
+    parser.add_argument('--hidden_units', type=int, default=800)  # hidden unit
+    parser.add_argument('--lambda_value', type=float, default=1)
+
+    parser.add_argument('--train_epoch', type=int, default=100)  # training epoch
+    parser.add_argument('--batch_size', type=int, default=1500)  # batch_size
+
+    parser.add_argument('--optimizer_method', choices=['Adam', 'RMSProp'], default='Adam')
+    parser.add_argument('--grad_clip', type=bool, default=False)
+    parser.add_argument('--base_lr', type=float, default=4e-5)  # learning rate
+    parser.add_argument('--decay_epoch_step', type=int, default=10,
+                        help="decay the learning rate for each n epochs")
+
+    parser.add_argument('--random_seed', type=int, default=1000)
+    parser.add_argument('--display_step', type=int, default=1)
+
+    args = parser.parse_args()
+    np.random.seed(args.random_seed)
+    rec = Autorec(args, num_users, num_items)
     if is_train:
+        if torch.cuda.is_available():
+            args.cuda = True
+            rec.cuda()
+        else:
+            args.cuda = False
+
+        optimer = optim.Adam(rec.parameters(), lr=args.base_lr, weight_decay=1e-4)
+
+        num_batch = int(math.ceil(num_users / args.batch_size))
+
+        torch_dataset = Data.TensorDataset(torch.from_numpy(train_r), torch.from_numpy(train_mask_r),
+                                           torch.from_numpy(train_r))
+        loader = Data.DataLoader(
+            dataset=torch_dataset,
+            batch_size=args.batch_size,
+            shuffle=True
+        )
+
         for epoch in range(args.train_epoch):
-            train(epoch=epoch)
-            test(epoch=epoch)
+            train(epoch=epoch, loader=loader, args=args, rec=rec, optimer=optimer, train_mask_r=train_mask_r)
+            test(epoch=epoch, args=args, rec=rec, test_r=test_r, test_mask_r=test_mask_r, user_test_set=user_test_set, user_train_set=user_train_set, item_test_set=item_test_set, item_train_set=item_train_set)
         print("Training finished")
         return True
     else:
         new_p_rate = dict()
-        rec = Autorec(args, num_users, num_items)
         rec.loadModel('./AutoRec.model', map_location=torch.device('cpu'))
         if u_id in users_train:
             num_p_rate_dict = rec.recommend_user(train_r[users_train[u_id]])
@@ -209,3 +205,4 @@ def train_model(is_train, u_id):
             new_p_rate[dict_new[num_id]] = num_p_rate_dict[num_id]
         del num_p_rate_dict
         return new_p_rate
+#train_model(False, '5VESqAgYsL9vzLEIA_xgnw')
