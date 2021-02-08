@@ -2,7 +2,7 @@ import argparse
 import torch
 import math
 import random
-import progressbar
+#import progressbar
 import numpy as np
 import pandas as pd
 import torch.optim as optim
@@ -10,9 +10,9 @@ import torch.utils.data as Data
 
 from model import Autorec
 
-p1 = progressbar.ProgressBar()
+#p1 = progressbar.ProgressBar()
 
-def rating_dataloader(bar_set):
+def rating_dataloader():
     print("Collecting the reviews data...")
     reviews = pd.read_csv("./data_file/review_bars.csv")[['review_id', 'user_id', 'business_id', 'stars', 'date']]
     reviews = reviews[reviews['date'].apply(lambda x: int(x.split('-')[0]) > 2018)]
@@ -45,10 +45,6 @@ def rating_dataloader(bar_set):
     test_num_users = len(users_test)
     train_num_users = len(users_train)
 
-    print("business number:", num_items)
-    print("train number:", train_num_users)
-    print("test number:", test_num_users)
-
     train_r = np.zeros((train_num_users, num_items))
     test_r = np.zeros((test_num_users, num_items))
 
@@ -60,14 +56,14 @@ def rating_dataloader(bar_set):
     reid_userid = dict(zip(reviews['review_id'], reviews['user_id']))
     del reviews
     # training set
-    p1.start(len(reid_barid))
-    count = 0
+    #p1.start(len(reid_barid))
+    #count = 0
     total = 0
     for re_id in reid_barid:
         b_id = reid_barid[re_id]
         u_id = reid_userid[re_id]
         star = int(reid_barar[re_id])
-        count += 1
+        #count += 1
         if u_id in users_train and b_id in business:
             train_r[users_train[u_id]][business[b_id]] = star
             train_mask_r[users_train[u_id]][business[b_id]] = 1
@@ -82,13 +78,11 @@ def rating_dataloader(bar_set):
             item_test_set.add(business[b_id])
             total += 1
 
-        p1.update(count)
+        #p1.update(count)
 
     num_users = len(user_train_set) + len(user_test_set)
     num_items = len(business)
-    print("number of users:", num_users)
-    print("number of bar:", num_items)
-    print("total of rating:", total)
+
     dic_new = dict(zip(business.values(), business.keys()))
     del reid_barid
     del reid_barar
@@ -149,19 +143,19 @@ def test(epoch, args, rec, test_r, test_mask_r, user_test_set, user_train_set, i
     if epoch == args.train_epoch:
         rec.saveModel('./AutoRec.model')
 
-def train_model(is_train, u_id, bar_set):
-    users_train, users_test, dict_new, num_users, num_items, num_total_ratings, train_r, train_mask_r, test_r, test_mask_r, user_train_set, item_train_set, user_test_set, item_test_set = rating_dataloader(bar_set)
+def train_model(is_train, u_id):
+    users_train, users_test, dict_new, num_users, num_items, num_total_ratings, train_r, train_mask_r, test_r, test_mask_r, user_train_set, item_train_set, user_test_set, item_test_set = rating_dataloader()
     parser = argparse.ArgumentParser(description='I-AutoRec ')
-    parser.add_argument('--hidden_units', type=int, default=800)  # hidden unit
+    parser.add_argument('--hidden_units', type=int, default=750)  # hidden unit
     parser.add_argument('--lambda_value', type=float, default=1)
 
-    parser.add_argument('--train_epoch', type=int, default=100)  # training epoch
+    parser.add_argument('--train_epoch', type=int, default=3)  # training epoch
     parser.add_argument('--batch_size', type=int, default=1500)  # batch_size
 
     parser.add_argument('--optimizer_method', choices=['Adam', 'RMSProp'], default='Adam')
     parser.add_argument('--grad_clip', type=bool, default=False)
-    parser.add_argument('--base_lr', type=float, default=4e-5)  # learning rate
-    parser.add_argument('--decay_epoch_step', type=int, default=10,
+    parser.add_argument('--base_lr', type=float, default=2e-4)  # learning rate
+    parser.add_argument('--decay_epoch_step', type=int, default=7,
                         help="decay the learning rate for each n epochs")
 
     parser.add_argument('--random_seed', type=int, default=1000)
@@ -171,13 +165,14 @@ def train_model(is_train, u_id, bar_set):
     np.random.seed(args.random_seed)
     rec = Autorec(args, num_users, num_items)
     if is_train:
+        print("Start trining the data...")
         if torch.cuda.is_available():
             args.cuda = True
             rec.cuda()
         else:
             args.cuda = False
 
-        optimer = optim.Adam(rec.parameters(), lr=args.base_lr, weight_decay=1e-4)
+        optimer = optim.Adam(rec.parameters(), lr=args.base_lr, weight_decay=1e-5)
 
         num_batch = int(math.ceil(num_users / args.batch_size))
 
@@ -193,8 +188,18 @@ def train_model(is_train, u_id, bar_set):
             train(epoch=epoch, loader=loader, args=args, rec=rec, optimer=optimer, train_mask_r=train_mask_r)
             test(epoch=epoch, args=args, rec=rec, test_r=test_r, test_mask_r=test_mask_r, user_test_set=user_test_set, user_train_set=user_train_set, item_test_set=item_test_set, item_train_set=item_train_set)
         print("Training finished")
-        return True
+        rec.saveModel('./Auto_train.model')
+        new_p_rate = dict()
+        if u_id in users_train:
+            num_p_rate_dict = rec.recommend_user(train_r[users_train[u_id]])
+        else:
+            num_p_rate_dict = rec.recommend_user(test_r[users_test[u_id]])
+        for num_id in num_p_rate_dict:
+            new_p_rate[dict_new[num_id]] = num_p_rate_dict[num_id]
+        del num_p_rate_dict
+        return new_p_rate
     else:
+        print("Collecting the AutoRec model...")
         new_p_rate = dict()
         rec.loadModel('./AutoRec.model', map_location=torch.device('cpu'))
         if u_id in users_train:
